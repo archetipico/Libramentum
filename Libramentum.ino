@@ -11,7 +11,7 @@
 
 char temp[7];
 const char* ssid = "hotspot";
-const char* password =  "password";
+const char* password = "password";
 double integral = 0;
 double prev_pidError = 0;
 int adjust = 0;
@@ -28,56 +28,47 @@ WiFiClient guest;
 PubSubClient client(guest);
 Servo servo_Y;
 
-/**
- * Metodo di setup: vengono dichiarate le intenzioni del
- * giroscopio/accelerometro tramite la libreria Wire.
- */
+/* Setup function: gyroscope intentions
+are declared here thanks to Wire.h. */
 void setup() {
   Serial.begin(115200);
-  
+
   servo_Y.attach(18);
   pinMode(5, OUTPUT);
-  
+
   wifiStart();
   wireStart();
 
   mqttStart();
 }
 
-/**
- * Qui vengono posizionati i metodi che
- * devono essere ripetuti ciclicamente.
- */
+/* Loop function */
 void loop() {
   client.loop();
-  
+
   readGyro();
   wireConnection();
-  
+
   doServo();
   doLed();
 
   mqttWrite();
 }
 
-/*
- * Operazioni per evitare che il servo-motore si inceppi e alteri
- * la sua stabilita'
- */
+/* Avoiding servo interruptions
+or instability */
 int deductServo(int x) {
-  if(x < 20) {
+  if (x < 20) {
     x = 17;
-  } else if(x > 160) {
+  } else if (x > 160) {
     x = 173;
   }
 
   return x;
 }
 
-/*
- * Semplice funzione che accende il LED quando il piano
- * si trova in una situazione critica
- */
+/* LED blinking if the plane
+is in a dangerous position */
 void doLed() {
   if(deg > 20 || deg < -20) {
     digitalWrite(5, HIGH);
@@ -86,30 +77,25 @@ void doLed() {
   }
 }
 
-/**
- * Viene semplicemento chiamato ad ogni loop per aggiornare
- * il servo motore con i dati del giroscopio.
- */
+/* Updating servo with gyroscope data */
 void doServo() {
   getData();
-  
+
   servoRotation_Y = deductServo(map(deg, -90, 90, 0, 179));
   servo_Y.write(servoRotation_Y);
 
   pidController();
-    
+
   delay(50);
 }
 
-/*
- * Preleva i dati per l'inclinazione del servo motore, che a causa
- * del giroscopio è solo da -90° a +90° e calcolare i vari delta
- * per calcolare la velocità angolare media (theta/tempo dove il tempo
- * e' trascurabile dato che la rotazione è praticamente istantanea).
- */
+/* Gets inclination (-90° to +90°) and
+computes angular velocity (theta/time)
+where time is negligible since the
+rotation happens istantly */
 void getData() {
   deg = translator(-x, y, z);
-  if(deg != prevDeg) {
+  if (deg != prevDeg) {
     theta = abs(prevDeg - deg);
   } else {
     theta = 0;
@@ -117,31 +103,26 @@ void getData() {
 
   prevDeg = deg;
   deltaTheta += theta;
-  
-  if(deg <= -20 || deg >= 20) {
+
+  if (deg <= -20 || deg >= 20) {
     unstability++;
   }
 }
 
-/*
- * Permette di castare i valori numerici di i
- * nel char array "temp", per poi farne il return.
- */
+/* Casting int16 values */
 char* int16toString(int16_t i) {
   sprintf(temp, "%d", i);
   return temp;
 }
 
-/**
- * Stabilisce una connessione MQTT tra l'ESP32 e il server hostato
- * su piattaforma apposita. I messaggi ricevuti verranno mostrati
- * nell'apposita box "WEBSOCKET UI" presente sul sito.
- */
+/* Setting up a MQTT connection between
+the ESP32 and a server hosted on cloudmqtt.
+The messages will be viewable on "WEBSOCKET UI" */
 void mqttStart() {
   client.setServer(MQTT_SERVER, MQTT_PORT);
 
-  while(!client.connected()) {
-    if(client.connect("ESP32Client", MQTT_USER, MQTT_PWD)) {
+  while (!client.connected()) {
+    if (client.connect("ESP32Client", MQTT_USER, MQTT_PWD)) {
       break;
     } else {
       delay(2000);
@@ -149,38 +130,36 @@ void mqttStart() {
   }
 }
 
-/**
- * Riferisce in tempo reale, tramite MQTT, le modifiche effettuate
- * sull'accelerometro e sul servo motore, in modo tale da tenere
- * il sistema sempre aggiornato. Stampa una volta su 100, per non
- * intasare la queue (approssimativamente 1 messaggio ogni 10s).
- */
+/* Real-time data is sent to the MQTT
+server to keep values updated. A message
+is sent every 100 evalutation (nearly once
+every 10 seconds) */
 void mqttWrite() {
-  if(event == 100) {
+  if (event == 100) {
     char result[100];
     char* first = "Unstability: ";
     char* second = "; Degrees right now: ";
     char* third = "; Average angular velocity: ";
     char* textUnst;
     char* textPerc = "";
-    
-    if(unstability > 100) { //202 e' il massimo
+
+    if (unstability > 100) {                  //max is 202
       textUnst = "Too much unstable";
     } else {
       textUnst = int16toString(unstability);
       textPerc = "%";
     }
-    
+
     strcpy(result, first);
     strcat(result, textUnst);
     strcat(result, textPerc);
     strcat(result, second);
-    strcat(result, int16toString((int)deg));
+    strcat(result, int16toString((int) deg));
     strcat(result, "°");
     strcat(result, third);
-    strcat(result, int16toString((int)(deltaTheta/100)));
+    strcat(result, int16toString((int) (deltaTheta/100)));
     strcat(result, "°/100rps");
-  
+
     client.publish("normaloide.ino", result);
     deltaTheta = 0;
     unstability = 0;
@@ -190,16 +169,13 @@ void mqttWrite() {
   }
 }
 
-/**
- * Funzione che implementa il PID controller per regolare
- * la rotazione del motore attraverso i relativi dati.
- */
+/* PID controller */
 void pidController() {
-  getData(); //faccio ricalcolare deg
+  getData();
 
   double weight = 1.3;
   int servoRotation_Now = deductServo(map(deg, -90, 90, 0, 179));
-  double pidError = servoRotation_Now - servoRotation_Y; //errore
+  double pidError = servoRotation_Now - servoRotation_Y;
 
   //proportional
   double pError = pidError * weight;
@@ -211,74 +187,69 @@ void pidController() {
   //derivative
   double derivative = (pidError - prev_pidError) / 100;
   double dError = derivative * weight;
-  
-  adjust = (int)(pError + iError + dError);
-  if(servoRotation_Y + adjust > 90) {
+
+  adjust = (int) (pError + iError + dError);
+  if (servoRotation_Y + adjust > 90) {
     pError = 90;
-  } else if(servoRotation_Y - adjust < -90) {
+  } else if (servoRotation_Y - adjust < -90) {
     pError = -90;
   }
-  
-  if(adjust > 0) {
-    adjust = (int)(servoRotation_Y + adjust) % 180;
+
+  if (adjust > 0) {
+    adjust = (int) (servoRotation_Y + adjust) % 180;
     servo_Y.write(map(adjust, -90, 90, 0, 179));
-  } else if(adjust < 0) {
-    adjust = (int)(servoRotation_Y - adjust) % (-180);
+  } else if (adjust < 0) {
+    adjust = (int) (servoRotation_Y - adjust) % (-180);
     servo_Y.write(map(adjust, -90, 90, 0, 179));
   }
 
   prev_pidError = pidError;;
 }
 
- /**
- * Aggiorna lo stato del valore dell'asse x e y del giroscopio.
- * Il dato è di 16bit, la prima iterazione calcola 8bit, e
- * shifta di 8bit (8bit occupati, 8 vuoti), l'or permette
- * al secondo read() di occupare gli 8bit rimanenti.
- */
+/* Updating gyroscope values.
+Data is 16bit, the first computed iteraction
+is 8 bits, then it shifts by other 8 bits
+(8 bits occupied, 8 bits free) so thanks
+to the OR we can occupy the other
+empty 8 bits */
 void readGyro() {
   x = Wire.read()<<8 | Wire.read();
   y = Wire.read()<<8 | Wire.read();
   z = Wire.read()<<8 | Wire.read();
 }
 
-/**
- * Dai complessi, atan2(x, r) sarà l'angolo dato dall'intersezione di r con x.
- * Nel caso in cui y = 0 (quindi il servo_Y), avrò un vettore del tipo
- * (-x, 0, z) e mi interesserà la rotazione sulla composizione degli assi Y e Z.
- * Usiamo -x in quanto e' l'asse che deve essere invertito per ottenere 
- * una rotazione opposta.
- */
+/* atan2(x, r) is the angle created from
+the intersection of r with X. If y = 0,
+I'll have a vector like (-x, 0, z) and
+I'm interested in Y and Z. We use -x since
+it's the axis that has to be inverted to
+obtain a reversed rotation */
 int translator(int x, int y, int z){
   double r, val;
-  
+
   r = sqrt((y*y) + (z*z));
 
   val = atan2(x, r);
   val = val * 180/3.14;
-  
-  return (int)val;
+
+  return (int) val;
 }
 
-/**
- * Metodo per permettere al WiFi di collegarsi ad una rete
- * precedentemente definita (guardo SSID e Password).
- */
+/* Allows Wi-Fi connection (look at SSID and Password) */
 void wifiStart() {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
   }
-  
+
   randomSeed(micros());
   Serial.println("WiFi connesso a " + WiFi.localIP());
 }
 
-/**
- * Metodo per la trasmissione del giroscopio/accelerometro.
- * 0x3B è l'ACCEL_XOUT_H register mentre in requestFrom(),
- * 3*2 sono i registri da richiedere e true serve per fermare richieste ulteriori.
- */
+/* Reading the gyroscope.
+0x3B is the ACCEL_XOUT_H register, 3*2
+are the registers we are interested in and
+true allows us to stop further requests */
 void wireConnection() {
   Wire.beginTransmission(MPU);
   Wire.write(0x3B);
@@ -286,10 +257,7 @@ void wireConnection() {
   Wire.requestFrom(MPU, 3*2, true);
 }
 
-/**
- * Metodo che raggruppa le azioni di Wire una volta che l'Arduino
- * è avviato e i processi devono essere eseguiti.
- */
+/* Starting the gyroscope */
 void wireStart() {
   Wire.begin();
   Wire.beginTransmission(MPU);
